@@ -119,11 +119,11 @@ class Simulation:
         long_format_id = list()
         long_format_data = list()
         long_format_time = list()
+        n_time = np.random.choice(list(range(1,11)), error_data.shape[0])
         
         for i in range(error_data.shape[0]):
-            n_time = np.random.choice(list(range(1,11)), 1)
-            time_idx = np.random.choice(10, n_time)
-            long_format_id.extend([id[i]] ** n_time)
+            time_idx = np.random.choice(10, n_time[i], replace=False)
+            long_format_id.extend([id[i]] * n_time[i])
             long_format_data.append(error_data[i, time_idx])
             long_format_time.append(time_idx / 10)
         
@@ -194,7 +194,7 @@ def main(args):
     v = args.v
     c = args.c
 
-    n_causal_snps = int(snps_array.shape[0] * causal) + 1
+    n_causal_snps = int(snps_array.shape[1] * causal) + 1
     snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
     
     if args.skewed:
