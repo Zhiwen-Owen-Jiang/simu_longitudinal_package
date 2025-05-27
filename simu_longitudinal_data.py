@@ -13,6 +13,16 @@ MASTHEAD += "* Data generation for longitudinal GWAS with sample relatedness \n"
 MASTHEAD += "*********************************************************************"
 
 
+"""
+v1: regular one
+v2: regress out covariates from snps_array (isn't helpful)
+v3: remove covariate effects, fixed causal effects
+v4: remove covariate effects, random causal variants
+v5: permute genotype data
+
+"""
+
+
 def GetLogger(logpath):
     log = logging.getLogger()
     log.setLevel(logging.INFO)
@@ -75,7 +85,7 @@ class Simulation:
         self.lam = 2 * (np.arange(10) + 3) ** (-self.a)
         
     def _GetBeta(self):
-        se = np.sqrt(np.array(range(4, 10 + 4), dtype=float) ** (-self.a * 1.2)) / 500
+        se = np.sqrt(np.array(range(4, 10 + 4), dtype=float) ** (-self.a * 1.2)) / 50
         true_b = np.random.normal(0, 1, size=(self.n_snps, 10)) * se
         true_beta = np.dot(true_b, self.bases.T) # (Ng * m) * (m * N)
         return true_b, true_beta
@@ -95,7 +105,7 @@ class Simulation:
         true_effect = np.random.normal(0, 0.5, 10) * np.arange(1, 11).astype(float) ** -2
         true_effect = np.dot(true_effect, self.bases.T).reshape(1, 10)
         population = self.population[2].values.reshape(-1, 1)
-        self.population_effect = np.dot(population, true_effect)
+        self.population_effect = np.dot(population, true_effect) / 10000
 
     def _GetEpsilon(self, var):
         if self.w < 0 or self.w > 1:
@@ -159,8 +169,11 @@ class Simulation:
         error_data = X + epsilon
         
         ## random sampling
-        error_data_df = self._random_sampling(error_data, list(self.population['IID']))
-
+        sampled_data = self._random_sampling(error_data, list(self.population['IID']))
+        complete_data = pd.DataFrame(error_data)
+        complete_data.insert(0, 'IID', self.population['IID'])
+        complete_data.insert(0, 'FID', self.population['FID'])
+                                
         mean_var_population_effect = np.mean(np.var(self.population_effect, axis=0))
         mean_var_Zbeta = np.mean(np.var(self.Zbeta, axis=0))
         mean_var_eta = np.mean(np.var(self.eta, axis=0))
@@ -173,7 +186,7 @@ class Simulation:
         print(f"The true heritability is {np.mean(true_heri)}")
         print(f"The signal-to-noise ratio is {np.mean(np.diag(sigmaX) / np.diag(np.cov(error_data.T)))}")
 
-        return error_data_df
+        return sampled_data, complete_data
 
 
 def main(args):
@@ -194,9 +207,16 @@ def main(args):
     v = args.v
     c = args.c
 
-    n_causal_snps = int(snps_array.shape[1] * causal) + 1
-    snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
-    
+    if causal < 1:
+        n_causal_snps = int(snps_array.shape[1] * causal) + 1
+        snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
+        # snps_array = snps_array[:, np.random.choice(snps_array.shape[1], n_causal_snps, replace=False)]
+    print(f"{snps_array.shape[1]} causal SNPs.")
+
+    # # regress covar out 
+    # covar = population[2].values.reshape(-1, 1)
+    # snps_array = snps_array - np.dot(covar, np.dot(covar.T, snps_array)) / np.sum(covar ** 2)
+        
     if args.skewed:
         dist = 'skewed'
     else:
@@ -218,9 +238,11 @@ def main(args):
     )
     
     for i in range(start, end+1):
-        phenotype = simulator.GetSimuData()
-        phenotype.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}.txt'), sep='\t', index=None)
+        sampled_data, complete_data = simulator.GetSimuData()
+        sampled_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}.txt'), sep='\t', index=None)
+        # complete_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}_complete.txt'), sep='\t', index=None)
         print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}.txt'))
+        # print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}_complete.txt'))
 
 
 parser = argparse.ArgumentParser()
