@@ -14,9 +14,9 @@ MASTHEAD += "*******************************************************************
 
 
 """
-v1: regular one
+v1: regular one (doing gwas)
 v2: regress out covariates from snps_array (isn't helpful)
-v3: remove covariate effects, fixed causal effects
+v3: remove covariate effects, fixed causal effects (doing heritability)
 v4: remove covariate effects, random causal variants
 v5: permute genotype data
 
@@ -55,23 +55,46 @@ class Simulation:
     Simulating phenotypes with relatedness and population stratification
     
     """
-    def __init__(self, heri, snps_array, population, a=1.8, w=0.8, skewed=False):
+    def __init__(
+            self, 
+            heri, 
+            snps_array, 
+            population, 
+            ld,
+            maf,
+            a=1.8, 
+            w=0.8, 
+            skewed=False, 
+            alpha=-1, 
+            gamma=0,
+            heri_simu=True
+        ):
         """
         heri: a float number between 0 and 1 of heritability
         snps_array (n, m): a np.array of causal variants (centered and normalized)
         population: a pd.DataFrame of FID, IID, and first PC (centered and normalized)
+        ld (m, 1): LD score of causal variants
+        maf (m, 1): MAF of causal variants
         a: decay rate of lambda, greater than 1. Currently it is only polynomial
         w: true signal proportion
         skewed: if noise distribution is skewed
+        alpha: level of MAF dependence
+        gamma: level of LD dependence
+        heri_simu: is heritability simulation?
         
         """
         self.heri = heri
         self.snps_array = snps_array
         self.population = population
+        self.ld = ld
+        self.maf = maf
         self.n_subs, self.n_snps = snps_array.shape
         self.a = a
         self.w = w
         self.skewed = skewed
+        self.alpha = alpha
+        self.gamma = gamma
+        self.heri_simu = heri_simu
         # self.logger = logging.getLogger(__name__)
 
         self._GetBase()
@@ -87,6 +110,7 @@ class Simulation:
     def _GetBeta(self):
         se = np.sqrt(np.array(range(4, 10 + 4), dtype=float) ** (-self.a * 1.2)) / 50
         true_b = np.random.normal(0, 1, size=(self.n_snps, 10)) * se
+        true_b *= np.sqrt((2 * self.maf * (1 - self.maf)) ** (1 + self.alpha) * (1 / self.ld) ** self.gamma)
         true_beta = np.dot(true_b, self.bases.T) # (Ng * m) * (m * N)
         return true_b, true_beta
     
@@ -105,7 +129,11 @@ class Simulation:
         true_effect = np.random.normal(0, 0.5, 10) * np.arange(1, 11).astype(float) ** -2
         true_effect = np.dot(true_effect, self.bases.T).reshape(1, 10)
         population = self.population[2].values.reshape(-1, 1)
-        self.population_effect = np.dot(population, true_effect) / 10000
+        self.population_effect = np.dot(population, true_effect)
+
+        # remove covariate effects
+        if self.heri_simu:
+            self.population_effect /= 10000
 
     def _GetEpsilon(self, var):
         if self.w < 0 or self.w > 1:
@@ -123,6 +151,16 @@ class Simulation:
         adj_eta = np.sqrt((1 - self.heri) * gvar / (self.heri * non_gvar))
         self.eta *= adj_eta
         self.population_effect *= adj_eta
+        
+    def _Adjheri2(self):
+        gvar = np.diagonal(self.true_gcov)
+        etavar = np.var(self.eta, axis=0)
+        cur = gvar / (gvar + etavar)
+        adj_eta = np.sqrt((1 - self.heri) / (1 - cur))
+        adj_gcov = np.sqrt(self.heri / cur).reshape(-1, 1)
+        self.eta *= adj_eta
+        self.true_gcov *= np.outer(adj_gcov, adj_gcov)
+        self.Zbeta *= adj_gcov
 
     @staticmethod
     def _random_sampling(error_data, id):
@@ -160,7 +198,7 @@ class Simulation:
         
         ## unexplained effect
         self._GetEta(np.diag(self.true_bgcov))
-        self._Adjheri()
+        self._Adjheri2()
     
         X = self.Zbeta + self.eta + self.population_effect
         true_heri = np.diagonal(self.true_gcov) / np.var(X, axis=0)
@@ -191,6 +229,7 @@ class Simulation:
 
 def main(args):
     input_dir = f'/work/users/o/w/owenjf/image_genetics/methods/bfiles/wgs_0325/{args.percent}percent'
+    input_dir2 = f'/work/users/o/w/owenjf/image_genetics/methods/bfiles/relatedness'
     output_dir = '/work/users/o/w/owenjf/image_genetics/methods/simu_longitudinal/data'
 
     population = pd.read_csv(os.path.join(input_dir, f'ukb_cal_oddchr_cleaned_maf_gene_hwe_white_kinship0.05_{args.percent}percent_10ksub_20pc_merged.eigenvec'), 
@@ -199,6 +238,9 @@ def main(args):
     population[2] = (population[2] - np.mean(population[2])) / np.std(population[2])
 
     snps_array = np.load(os.path.join(input_dir, f'ukb_cal_oddchr_white_kinship0.05_{args.percent}percent_10ksub_10ksnp_merged_normed.npy'))
+    ld_maf = pd.read_csv(os.path.join(input_dir2, f'ukb_cal_oddchr_cleaned_maf_gene_hwe_white_kinship0.05_{args.percent}percent_10ksub_ld.score.ld'), sep=' ')
+    ld = ld_maf['ldscore'].values.reshape(-1, 1)
+    maf = ld_maf['MAF'].values.reshape(-1, 1)
 
     heri = args.heri
     causal = args.causal
@@ -206,11 +248,15 @@ def main(args):
     w = args.w
     v = args.v
     c = args.c
+    alpha=args.alpha
+    gamma=args.gamma
+    heri_simu = args.heri_simu
 
     if causal < 1:
         n_causal_snps = int(snps_array.shape[1] * causal) + 1
         snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
-        # snps_array = snps_array[:, np.random.choice(snps_array.shape[1], n_causal_snps, replace=False)]
+        ld = ld[:n_causal_snps]
+        maf = maf[:n_causal_snps]
     print(f"{snps_array.shape[1]} causal SNPs.")
 
     # # regress covar out 
@@ -232,17 +278,22 @@ def main(args):
         heri=heri, 
         snps_array=snps_array, 
         population=population, 
+        ld=ld,
+        maf=maf,
         a=a, 
         w=w, 
-        skewed=args.skewed
+        skewed=args.skewed,
+        alpha=alpha,
+        gamma=gamma,
+        heri_simu=heri_simu
     )
     
     for i in range(start, end+1):
         sampled_data, complete_data = simulator.GetSimuData()
-        sampled_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}.txt'), sep='\t', index=None)
-        # complete_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}_complete.txt'), sep='\t', index=None)
-        print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}.txt'))
-        # print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_10times_v{v}_c{i}_complete.txt'))
+        sampled_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}.txt'), sep='\t', index=None)
+        # complete_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}_complete.txt'), sep='\t', index=None)
+        print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}.txt'))
+        # print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}_complete.txt'))
 
 
 parser = argparse.ArgumentParser()
@@ -250,9 +301,12 @@ parser.add_argument('--heri', type=float, help='true heritability of each time p
 parser.add_argument('-v', help="version of simulation")
 parser.add_argument('-c', help='which replicate it is')
 parser.add_argument('-w', type=float, help='percentage of true signal')
+parser.add_argument('--alpha', type=float, help='dependence of genetic effects on MAF')
+parser.add_argument('--gamma', type=float, help='dependence of genetic effects on LD score')
 parser.add_argument('--percent', help='relatedness percentage')
 parser.add_argument('--causal', type=float, help='causal variant percentage')
 parser.add_argument('--skewed', action='store_true', help='if the voxel distribution is skewed')
+parser.add_argument('--heri-simu', action='store_true', help='doing heritability simulation?')
 
 
 if __name__ == '__main__':
