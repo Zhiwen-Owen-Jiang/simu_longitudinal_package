@@ -152,16 +152,6 @@ class Simulation:
         adj_eta = np.sqrt((1 - self.heri) * gvar / (self.heri * non_gvar))
         self.eta *= adj_eta
         self.population_effect *= adj_eta
-        
-    # def _Adjheri2(self):
-    #     gvar = np.diagonal(self.true_gcov)
-    #     etavar = np.var(self.eta, axis=0)
-    #     cur = gvar / (gvar + etavar)
-    #     adj_eta = np.sqrt((1 - self.heri) / (1 - cur))
-    #     adj_gcov = np.sqrt(self.heri / cur).reshape(-1, 1)
-    #     self.eta *= adj_eta
-    #     self.true_gcov *= np.outer(adj_gcov, adj_gcov)
-    #     self.Zbeta *= np.sqrt(self.heri / cur)
 
     @staticmethod
     def _random_sampling(error_data, id):
@@ -209,9 +199,6 @@ class Simulation:
         
         ## random sampling
         sampled_data = self._random_sampling(error_data, list(self.population['IID']))
-        complete_data = pd.DataFrame(error_data)
-        complete_data.insert(0, 'IID', self.population['IID'])
-        complete_data.insert(0, 'FID', self.population['FID'])
                                 
         mean_var_population_effect = np.mean(np.var(self.population_effect, axis=0))
         mean_var_Zbeta = np.mean(np.var(self.Zbeta, axis=0))
@@ -225,45 +212,41 @@ class Simulation:
         print(f"The true heritability is {np.mean(true_heri)}")
         print(f"The signal-to-noise ratio is {np.mean(np.diag(sigmaX) / np.diag(np.cov(error_data.T)))}")
 
-        return sampled_data, complete_data
+        return sampled_data
 
 
 def main(args):
-    input_dir = f'/work/users/o/w/owenjf/image_genetics/methods/bfiles/wgs_0325/{args.percent}percent'
+    # input_dir = f'/work/users/o/w/owenjf/image_genetics/methods/bfiles/wgs_0325/{args.percent}percent'
     input_dir2 = f'/work/users/o/w/owenjf/image_genetics/methods/bfiles/relatedness'
     output_dir = '/work/users/o/w/owenjf/image_genetics/methods/simu_longitudinal/data'
 
-    population = pd.read_csv(os.path.join(input_dir, f'ukb_cal_oddchr_cleaned_maf_gene_hwe_white_kinship0.05_{args.percent}percent_10ksub_20pc_merged.eigenvec'), 
-                             sep='\t', header=None, usecols=[0, 1, 2])
+    population = pd.read_csv(os.path.join(input_dir2, f'ukb_imp_chr14_v3_maf_hwe_INFO_QC_white_kinship0.05_0percent_10ksub.fam'), 
+                             sep='\t', header=None, usecols=[0, 1, 4])
     population = population.rename({0: 'FID', 1: 'IID'}, axis=1)
-    population[2] = (population[2] - np.mean(population[2])) / np.std(population[2])
+    population[2] = (population[4] - np.mean(population[4])) / np.std(population[4])
 
-    snps_array = np.load(os.path.join(input_dir, f'ukb_cal_oddchr_white_kinship0.05_{args.percent}percent_10ksub_10ksnp_merged_normed.npy'))
-    ld_maf = pd.read_csv(os.path.join(input_dir2, f'ukb_cal_oddchr_cleaned_maf_gene_hwe_white_kinship0.05_{args.percent}percent_10ksub_ld.score.ld'), sep=' ')
+    snps_array = np.load(os.path.join(input_dir2, f'ukb_imp_chr14_white_kinship0.05_0percent_10ksub_2ksnp_normed.npy'))
+    ld_maf = pd.read_csv(os.path.join(input_dir2, f'ukb_imp_chr14_v3_maf_hwe_INFO_QC_white_kinship0.05_0percent_10ksub_ld.score.ld'), sep=' ')
     ld = ld_maf['ldscore'].values.reshape(-1, 1)
     maf = ld_maf['MAF'].values.reshape(-1, 1)
 
     heri = args.heri
-    causal = args.causal
+    causal = 0.15
     a = 1.8
     w = args.w
-    v = args.v
+    v = 6
     c = args.c
     alpha=args.alpha
     gamma=args.gamma
     heri_simu = args.heri_simu
 
-    if causal < 1:
-        n_causal_snps = int(snps_array.shape[1] * causal) + 1
-        snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
-        ld = ld[:n_causal_snps]
-        maf = maf[:n_causal_snps]
+    # if causal < 1:
+    #     n_causal_snps = int(snps_array.shape[1] * causal) + 1
+    #     snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
+    #     ld = ld[:n_causal_snps]
+    #     maf = maf[:n_causal_snps]
     print(f"{snps_array.shape[1]} causal SNPs.")
 
-    # # regress covar out 
-    # covar = population[2].values.reshape(-1, 1)
-    # snps_array = snps_array - np.dot(covar, np.dot(covar.T, snps_array)) / np.sum(covar ** 2)
-        
     if args.skewed:
         dist = 'skewed'
     else:
@@ -290,11 +273,9 @@ def main(args):
     )
     
     for i in range(start, end+1):
-        sampled_data, complete_data = simulator.GetSimuData()
-        sampled_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}.txt'), sep='\t', index=None)
-        # complete_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}_complete.txt'), sep='\t', index=None)
-        print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}.txt'))
-        # print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_{args.percent}percent_10ksub_causal{args.causal}_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}_complete.txt'))
+        sampled_data = simulator.GetSimuData()
+        sampled_data.to_csv(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_0percent_10ksub_causal0.15_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}.txt'), sep='\t', index=None)
+        print(os.path.join(output_dir, f'longitudinal_data_common_snps_kinship0.05_0percent_10ksub_causal0.15_heri{heri}_a{a}_w{w}_{dist}_alpha{alpha}_gamma{gamma}_10times_v{v}_c{i}.txt'))
 
 
 parser = argparse.ArgumentParser()
