@@ -20,6 +20,8 @@ v3: remove covariate effects, fixed causal effects (doing heritability)
 v4: remove covariate effects, random causal variants
 v5: adjust both gvar and etavar to reduce sample variance
 v6: hapmap3 SNPs
+v7: hapmap3 SNPs, fixed beta across replicates
+v8: genotyped SNPs, fixed beta across replicates
 
 """
 
@@ -101,6 +103,12 @@ class Simulation:
         self._GetBase()
         self._GetLambda()
 
+        self.true_b, self.true_beta = self._GetBeta()
+        self.Zb = np.dot(self.snps_array, self.true_b)
+        self.true_bgcov = np.cov(self.Zb.T)
+        self.Zbeta = np.dot(self.snps_array, self.true_beta)
+        self.true_gcov = np.cov(self.Zbeta.T)
+
     def _GetBase(self):
         time_points = np.array([i / 10 for i in range(10)]).reshape(-1, 1)
         self.bases = np.sqrt(2) * np.cos(np.arange(10) * np.pi * time_points)
@@ -181,11 +189,11 @@ class Simulation:
         self._GetCovarEffect()
         
         ## common variants effect
-        self.true_b, self.true_beta = self._GetBeta()
-        self.Zb = np.dot(self.snps_array, self.true_b)
-        self.true_bgcov = np.cov(self.Zb.T)
-        self.Zbeta = np.dot(self.snps_array, self.true_beta)
-        self.true_gcov = np.cov(self.Zbeta.T)
+        # self.true_b, self.true_beta = self._GetBeta()
+        # self.Zb = np.dot(self.snps_array, self.true_b)
+        # self.true_bgcov = np.cov(self.Zb.T)
+        # self.Zbeta = np.dot(self.snps_array, self.true_beta)
+        # self.true_gcov = np.cov(self.Zbeta.T)
         
         ## unexplained effect
         self._GetEta(np.diag(self.true_bgcov))
@@ -234,7 +242,7 @@ def main(args):
     causal = 0.15
     a = 1.8
     w = args.w
-    v = 6
+    v = args.v
     c = args.c
     alpha=args.alpha
     gamma=args.gamma

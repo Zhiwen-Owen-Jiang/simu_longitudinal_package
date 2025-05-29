@@ -20,6 +20,8 @@ v3: remove covariate effects, fixed causal effects (doing heritability)
 v4: remove covariate effects, random causal variants
 v5: adjust both gvar and etavar to reduce sample variance
 v6: hapmap3 SNPs
+v7: hapmap3 SNPs, fixed beta across replicates
+v8: genotyped SNPs, fixed beta across replicates
 
 """
 
@@ -101,6 +103,12 @@ class Simulation:
         self._GetBase()
         self._GetLambda()
 
+        self.true_b, self.true_beta = self._GetBeta()
+        self.Zb = np.dot(self.snps_array, self.true_b)
+        self.true_bgcov = np.cov(self.Zb.T)
+        self.Zbeta = np.dot(self.snps_array, self.true_beta)
+        self.true_gcov = np.cov(self.Zbeta.T)
+
     def _GetBase(self):
         time_points = np.array([i / 10 for i in range(10)]).reshape(-1, 1)
         self.bases = np.sqrt(2) * np.cos(np.arange(10) * np.pi * time_points)
@@ -153,16 +161,6 @@ class Simulation:
         self.eta *= adj_eta
         self.population_effect *= adj_eta
         
-    # def _Adjheri2(self):
-    #     gvar = np.diagonal(self.true_gcov)
-    #     etavar = np.var(self.eta, axis=0)
-    #     cur = gvar / (gvar + etavar)
-    #     adj_eta = np.sqrt((1 - self.heri) / (1 - cur))
-    #     adj_gcov = np.sqrt(self.heri / cur).reshape(-1, 1)
-    #     self.eta *= adj_eta
-    #     self.true_gcov *= np.outer(adj_gcov, adj_gcov)
-    #     self.Zbeta *= np.sqrt(self.heri / cur)
-
     @staticmethod
     def _random_sampling(error_data, id):
         long_format_id = list()
@@ -191,11 +189,12 @@ class Simulation:
         self._GetCovarEffect()
         
         ## common variants effect
-        self.true_b, self.true_beta = self._GetBeta()
-        self.Zb = np.dot(self.snps_array, self.true_b)
-        self.true_bgcov = np.cov(self.Zb.T)
-        self.Zbeta = np.dot(self.snps_array, self.true_beta)
-        self.true_gcov = np.cov(self.Zbeta.T)
+        if not self.heri_simu:
+            self.true_b, self.true_beta = self._GetBeta()
+            self.Zb = np.dot(self.snps_array, self.true_b)
+            self.true_bgcov = np.cov(self.Zb.T)
+            self.Zbeta = np.dot(self.snps_array, self.true_beta)
+            self.true_gcov = np.cov(self.Zbeta.T)
         
         ## unexplained effect
         self._GetEta(np.diag(self.true_bgcov))
