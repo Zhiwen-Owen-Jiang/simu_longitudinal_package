@@ -14,7 +14,10 @@ MASTHEAD += "*******************************************************************
 
 
 """
-v1: hapmap3 SNPs, fixed beta across replicates
+v1: hapmap3 SNPs, fixed beta across replicates, fixed causal variants
+v2: hapmap3 SNPs, varying beta across replicates, fixed causal variants
+v3: hapmap3 SNPs, varying beta across replicates, varying causal variants
+v4: causal variants (0.01 <= maf 0.05)
 
 """
 
@@ -116,33 +119,35 @@ class Simulation:
         return epsilon
 
     def GetSimuData(self):
-        ## covariate effect
-        self._GetCovarEffect()
-        
-        ## common variants effect
-        # self.true_b, self.true_beta = self._GetBeta()
-        # self.Zb = np.dot(self.snps_array, self.true_b)
-        # self.true_bgcov = np.cov(self.Zb.T)
-        # self.Zbeta = np.dot(self.snps_array, self.true_beta)
-        # self.true_gcov = np.cov(self.Zbeta.T)
-        
-        X = self.Zbeta + self.population_effect
-        epsilon = self._GetEpsilon()
-        error_data = X + epsilon
-        true_heri = self.heri / np.var(error_data)
+        error_data = np.zeros((self.n_subs, 50))
+
+        for i in range(50):
+            ## covariate effect
+            self._GetCovarEffect()
+            
+            ## common variants effect
+            self.true_beta = self._GetBeta()
+            self.Zbeta = np.dot(self.snps_array, self.true_beta)
+            self.true_gcov = np.var(self.Zbeta)
+            self.Zbeta *= np.sqrt(self.heri / self.true_gcov)
+            
+            X = self.Zbeta + self.population_effect
+            epsilon = self._GetEpsilon()
+            error_data[:, i] = (X + epsilon).reshape(-1)
+            # true_heri = self.heri / np.var(error_data[:, i])
 
         error_data_df = pd.DataFrame(error_data)
         error_data_df.insert(0, 'IID', self.population['IID'])
         error_data_df.insert(0, 'FID', self.population['FID']) 
                                 
-        mean_var_population_effect = np.var(self.population_effect)
-        mean_var_Zbeta = np.var(self.Zbeta)
-        mean_var_epsilon = np.var(epsilon)
+        # mean_var_population_effect = np.var(self.population_effect)
+        # mean_var_Zbeta = np.var(self.Zbeta)
+        # mean_var_epsilon = np.var(epsilon)
 
-        print(f"The empirical variance of population effect is {mean_var_population_effect}")
-        print(f"The empirical variance of Zbeta is {mean_var_Zbeta}")
-        print(f"The empirical variance of epsilon is {mean_var_epsilon}")
-        print(f"The true heritability is {np.mean(true_heri)}")
+        # print(f"The empirical variance of population effect is {mean_var_population_effect}")
+        # print(f"The empirical variance of Zbeta is {mean_var_Zbeta}")
+        # print(f"The empirical variance of epsilon is {mean_var_epsilon}")
+        # print(f"The true heritability is {np.mean(true_heri)}")
 
         return error_data_df
 
@@ -170,11 +175,16 @@ def main(args):
     gamma = args.gamma
     use_covar = args.use_covar
 
-    # if causal < 1:
-    #     n_causal_snps = int(snps_array.shape[1] * causal) + 1
-    #     snps_array = snps_array[:, :n_causal_snps] # fix causal snps across replicates
-    #     ld = ld[:n_causal_snps]
-    #     maf = maf[:n_causal_snps]
+    if causal < 1 and causal != 0.15:
+        n_causal_snps = int(snps_array.shape[1] * causal) + 1
+        causal_idxs = np.random.choice(snps_array.shape[1], n_causal_snps, replace=False)
+        snps_array = snps_array[:, causal_idxs] # fix causal snps across replicates
+        ld = ld[causal_idxs]
+        maf = maf[causal_idxs]
+    idxs = (maf <= 0.05).reshape(-1)
+    snps_array = snps_array[:, idxs]
+    ld = ld[idxs]
+    maf = maf[idxs]
     print(f"{snps_array.shape[1]} causal SNPs.")
 
     if args.skewed:
@@ -202,8 +212,8 @@ def main(args):
     
     for i in range(start, end+1):
         error_data = simulator.GetSimuData()
-        error_data.to_csv(os.path.join(output_dir, f'single_data_common_snps_kinship0.05_0percent_10ksub_causal0.15_heri{heri}_{dist}_alpha{alpha}_gamma{gamma}_v{v}_c{i}.txt'), sep='\t', index=None)
-        print(os.path.join(output_dir, f'single_data_common_snps_kinship0.05_0percent_10ksub_causal0.15_heri{heri}_{dist}_alpha{alpha}_gamma{gamma}_v{v}_c{i}.txt'))
+        error_data.to_csv(os.path.join(output_dir, f'single_data_common_snps_kinship0.05_0percent_10ksub_causal{causal}_heri{heri}_{dist}_alpha{alpha}_gamma{gamma}_v{v}_c{i}.txt'), sep='\t', index=None)
+        print(os.path.join(output_dir, f'single_data_common_snps_kinship0.05_0percent_10ksub_causal{causal}_heri{heri}_{dist}_alpha{alpha}_gamma{gamma}_v{v}_c{i}.txt'))
 
 
 parser = argparse.ArgumentParser()
